@@ -19,6 +19,12 @@ require 'date'
 
 class VcfToBeacon
 
+  def initialize(files)
+    parse_options
+    setup_columns
+    convert_vcf(files)
+  end
+
   def parse_options
     @opts = {
       :dataset_id => ENV['BeaconDatasetID'] || 1,
@@ -31,6 +37,7 @@ class VcfToBeacon
       [ '--separator',  '-s',  GetoptLong::REQUIRED_ARGUMENT ],
       [ '--header',     '-p',  GetoptLong::NO_ARGUMENT ],
       [ '--chrsfile',   '-c',  GetoptLong::REQUIRED_ARGUMENT ],
+      [ '--nofilltags', '-n',  GetoptLong::NO_ARGUMENT ],
     )
     args.each_option do |name, value|
       case name
@@ -42,14 +49,14 @@ class VcfToBeacon
         @opts[:header] = true
       when /--chrsfile/
         @opts[:chrs_file] = value
+      when /--nofilltags/
+        @opts[:no_fill_tags] = true
       end
     end
   end
 
-  def initialize(files)
-    parse_options
-    setup_columns
-    convert_vcf(files)
+  def get_index(key)
+    @col_indices[key]
   end
 
   def setup_columns
@@ -74,19 +81,12 @@ class VcfToBeacon
     }
   end
 
-  def get_index(key)
-    @col_indices[key]
-  end
-
   def convert_vcf(files)
     files.each_with_index do |vcf, i|
       count = "#{i+1} / #{files.size} files"
       puts "#{DateTime.now.to_s} START vcftobeacon #{count}"
 
       @vcf_file = vcf
-
-      # create a .norm file
-      normalize_vcf_file
 
       # create .variants.data, .variants.matching.sample.data, and .sampless.data files
       open_data_files
@@ -96,20 +96,6 @@ class VcfToBeacon
 
       puts "#{DateTime.now.to_s} DONE vcftobeacon #{count}"
       puts
-    end
-  end
-
-  def normalize_vcf_file
-    puts "#{DateTime.now.to_s} Filtering/Coding/Normalizing file #{@vcf_file}"
-    if File.exists?(@opts[:chrs_file])
-      cmd = "bcftools filter -e 'N_ALT == 0' #{@vcf_file} | bcftools annotate --rename-chrs #{@opts[:chrs_file]} | bcftools norm -m -both | bcftools +fill-tags -o #{@vcf_file}.norm"
-      puts cmd
-      system(cmd)
-    else
-      puts "Warning: chromosome rename file #{@opts[:chrs_file]} is not found"
-      cmd = "bcftools filter -e 'N_ALT == 0' #{@vcf_file} | bcftools norm -m -both | bcftools +fill-tags -o #{@vcf_file}.norm"
-      puts cmd
-      system(cmd)
     end
   end
 
@@ -149,10 +135,18 @@ class VcfToBeacon
     @samples_file.puts samples_header.join(@opts[:separator]) if @opts[:header]
   end
 
+  def bcftools_command_line
+    cmd = "bcftools filter -e 'N_ALT == 0' #{@vcf_file}"
+    cmd += " | bcftools annotate --rename-chrs #{@opts[:chrs_file]}" if File.exists?(@opts[:chrs_file])
+    cmd += " | bcftools norm -m -both"
+    cmd += " | bcftools +fill-tags" unless @opts[:no_fill_tags]
+    cmd += " | bcftools query --allow-undef-tags -f '#{@bcf_query}[\t%SAMPLE=%GT]\n'"
+    return cmd
+  end
+
   def generate_variants_data
     puts "#{DateTime.now.to_s} Genarating variants data files #{@vcf_file}.variants.data, #{@vcf_file}.variants.matching.sample.data"
-    cmd = "bcftools query --allow-undef-tags -f '#{@bcf_query}[\t%SAMPLE=%GT]\n' #{@vcf_file}.norm"
-    puts cmd
+    puts cmd = bcftools_command_line
     IO.popen(cmd, "r").each do |line|
       ary = line.strip.split("\t")
 

@@ -13,10 +13,6 @@
 # notes           : Install bcftools and add plugin +fill-tags to the path (try `bcftools +fill-tags -vv` to see if you have the plugin).
 # ruby_version    : Should work with any version of Ruby from 1.8 through 2.7
 #
-# NOTE:
-#  * Couldn't make the first autoincrement id column to null in data; if it's possible, we could use the following shortcut, hopefully:
-#    `cat file | psql -h localhost -p 5432 -d elixir_beacon_dev -U microaccounts_dev -c "copy beacon_data_table from stdin with (format 'text')"`
-#
 
 require 'getoptlong'
 require 'date'
@@ -24,21 +20,17 @@ require 'date'
 class VcfToBeacon
 
   def parse_options
-    # To change the dataset ID, set the environmental/shell variable BeaconDatasetID or use the option --datasetid/-i (deafult: 1)
-    # To change a separator for columns, set the environmental/shell variable BeaconDataSeparator or use the option --separator/-s, e.g., change to ";" for SQL (default: "\t")
-    # To change the file to rename chromosomes, set the environmental/shell variable BeaconChrsFile or use the option --chrsfile/-c, e.g., change to ";" for SQL (default: "\t")
-    # To print column headers, set the environmental/shell variable BeaconDataHeader to any value, e.g., "true" or use the option --header/-p (default: false)
     @opts = {
       :dataset_id => ENV['BeaconDatasetID'] || 1,
       :separator => ENV['BeaconDataSeparator'] || "\t",
+      :header => ENV['BeaconDataHeader'] || false,
       :chrs_file => ENV['BeaconChrsFile'] || './chr_name_conv.txt',
-      :header => ENV['BeaconDataHeader'] || false
     }
     args = GetoptLong.new(
       [ '--datasetid',  '-i',  GetoptLong::REQUIRED_ARGUMENT ],
       [ '--separator',  '-s',  GetoptLong::REQUIRED_ARGUMENT ],
+      [ '--header',     '-p',  GetoptLong::NO_ARGUMENT ],
       [ '--chrsfile',   '-c',  GetoptLong::REQUIRED_ARGUMENT ],
-      [ '--header',     '-p',  GetoptLong::NO_ARGUMENT ]
     )
     args.each_option do |name, value|
       case name
@@ -46,10 +38,10 @@ class VcfToBeacon
         @opts[:dataset_id] = value
       when /--separator/
         @opts[:separator] = value
-      when /--chrsfile/
-        @opts[:chrs_file] = value
       when /--header/
         @opts[:header] = true
+      when /--chrsfile/
+        @opts[:chrs_file] = value
       end
     end
   end
@@ -89,7 +81,7 @@ class VcfToBeacon
   def convert_vcf(files)
     files.each_with_index do |vcf, i|
       count = "#{i+1} / #{ARGV.size} files"
-      puts "#{DateTime.now.to_s} START #{count}"
+      puts "#{DateTime.now.to_s} START vcftobeacon #{count}"
 
       @vcf_file = vcf
 
@@ -102,14 +94,19 @@ class VcfToBeacon
       generate_samples_data
       close_data_files
 
-      puts "#{DateTime.now.to_s} DONE #{count}"
+      puts "#{DateTime.now.to_s} DONE vcftobeacon #{count}"
       puts
     end
   end
 
   def normalize_vcf_file
     puts "#{DateTime.now.to_s} Filtering/Coding/Normalizing file #{@vcf_file}"
-    system("bcftools filter -e 'N_ALT == 0' #{@vcf_file} | bcftools annotate --rename-chrs #{@opts[:chrs_file]} | bcftools norm -m -both | bcftools +fill-tags -o #{@vcf_file}.norm")
+    if File.exists?(@opts[:chrs_file])
+      system("bcftools filter -e 'N_ALT == 0' #{@vcf_file} | bcftools annotate --rename-chrs #{@opts[:chrs_file]} | bcftools norm -m -both | bcftools +fill-tags -o #{@vcf_file}.norm")
+    else
+      puts "Warning: chromosome rename file #{@opts[:chrs_file]} is not found"
+      system("bcftools filter -e 'N_ALT == 0' #{@vcf_file} | bcftools norm -m -both | bcftools +fill-tags -o #{@vcf_file}.norm")
+    end
   end
 
   def open_data_files

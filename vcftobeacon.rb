@@ -62,7 +62,7 @@ class VcfToBeacon
     variants_columns = %w(CHROM POS ID REF ALT END TYPE SVLEN AC AN NS AF)
     var_sam_columns = %w(CHROM POS ID REF ALT TYPE)
 
-    @bcf_query = columns.map { |col| "%#{col}"}.join("\t")
+    @bcf_query = columns.map { |col| "%#{col}" }.join("\t")
 
     @col_indices = {
       :svlen => columns.index("SVLEN"),
@@ -102,10 +102,14 @@ class VcfToBeacon
   def normalize_vcf_file
     puts "#{DateTime.now.to_s} Filtering/Coding/Normalizing file #{@vcf_file}"
     if File.exists?(@opts[:chrs_file])
-      system("bcftools filter -e 'N_ALT == 0' #{@vcf_file} | bcftools annotate --rename-chrs #{@opts[:chrs_file]} | bcftools norm -m -both | bcftools +fill-tags -o #{@vcf_file}.norm")
+      cmd = "bcftools filter -e 'N_ALT == 0' #{@vcf_file} | bcftools annotate --rename-chrs #{@opts[:chrs_file]} | bcftools norm -m -both | bcftools +fill-tags -o #{@vcf_file}.norm"
+      puts cmd
+      system(cmd)
     else
       puts "Warning: chromosome rename file #{@opts[:chrs_file]} is not found"
-      system("bcftools filter -e 'N_ALT == 0' #{@vcf_file} | bcftools norm -m -both | bcftools +fill-tags -o #{@vcf_file}.norm")
+      cmd = "bcftools filter -e 'N_ALT == 0' #{@vcf_file} | bcftools norm -m -both | bcftools +fill-tags -o #{@vcf_file}.norm"
+      puts cmd
+      system(cmd)
     end
   end
 
@@ -148,6 +152,7 @@ class VcfToBeacon
   def generate_variants_data
     puts "#{DateTime.now.to_s} Genarating variants data files #{@vcf_file}.variants.data, #{@vcf_file}.variants.matching.sample.data"
     cmd = "bcftools query --allow-undef-tags -f '#{@bcf_query}[\t%SAMPLE=%GT]\n' #{@vcf_file}.norm"
+    puts cmd
     IO.popen(cmd, "r").each do |line|
       ary = line.strip.split("\t")
 

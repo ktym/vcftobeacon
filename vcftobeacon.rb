@@ -3,15 +3,14 @@
 # title           : vcftobeacon.rb
 # description     : The following script takes VCF files and generates the three files with the columns for the Beacon.
 # author          : Toshiaki Katayama, Dietmar Fernandez-Orth
-# date            : 2020-01-14
-# version         : 1.2
+# date            : 2020-02-13
+# version         : 1.3
 # usage           : ruby vcftobeacon.rb /path/to/*.vcf
 # extended_usage  : BeaconDatasetID=5 BeaconDataSeparator=";" BeaconDataHeader=true ruby vcftobeacon.rb /path/to/*.vcf > vcftobeacon.log
 # notes           : Install bcftools and add plugin +fill-tags to the path (try `bcftools +fill-tags -vv` to see if you have the plugin).
 # ruby_version    : Should work with any version of Ruby from 1.8 through 2.7
 #
 # NOTE:
-#  * We don't need to print headers as I found CSV headers in sample data are dirfferent from the schema (and also from the ones in Dietmar's script) ...
 #  * Couldn't make the first autoincrement id column to null in data; if it's possible, we could use the following shortcut, hopefully:
 #    `cat file | psql -h localhost -p 5432 -d elixir_beacon_dev -U microaccounts_dev -c "copy beacon_data_table from stdin with (format 'text')"`
 #
@@ -46,8 +45,9 @@ ARGV.each_with_index do |vcf, i|
   count = "#{i+1} / #{ARGV.size} files"
   puts "#{DateTime.now.to_s} START #{count}"
 
-  puts "Normalizing file #{vcf}"
-  system("bcftools norm -m -both #{vcf} | bcftools +fill-tags -o #{vcf}.norm")
+  puts "Filtering/Coding/Normalizing file #{vcf}"
+  system("bcftools filter -e 'N_ALT == 0' #{vcf} | bcftools annotate --rename-chrs ./chr_name_conv.txt | bcftools norm -m -both | bcftools +fill-tags -o #{vcf}.norm")
+
 
   puts "Generating file #{vcf}.variants.data"
   # https://github.com/ga4gh-beacon/beacon-elixir/blob/master/deploy/db/db/data/1_chr21_subset.variants.csv

@@ -1,51 +1,86 @@
 #!/usr/bin/env ruby
-
+#
 # title           : vcftobeacon.rb
-# description     : The following script takes the vcf files and generates a file with the columns for the Beacon.
-# author          : Toshiaki Katayama
+# description     : The following script takes VCF files and generates the three files with the columns for the Beacon.
+# author          : Toshiaki Katayama, Dietmar Fernández Orth
 # date            : 2019-12-17
 # version         : 1.0
 # usage           : ruby vcftobeacon.rb /path/to/*.vcf
-# notes           : Install bcftools and add plugin +fill-tags to the path.
+# extended_usage  : BeaconDatasetID=5 BeaconDataSeparator=";" BeaconDataHeader=true BeaconDataSVtype=SVTYPE ruby vcftobeacon.rb /path/to/*.vcf > vcftobeacon.log
+# notes           : Install bcftools and add plugin +fill-tags to the path (try `bcftools +fill-tags -vv` to see if you have the plugin).
 # ruby_version    : 2.6
+#
+# NOTE:
+#  * TODO: confirm if variants.matching.sample and samples tables works
+#  * Don't need to print headers as I found CSV headers in sample data are dirfferent from the schema (and also from the ones in Dietmar's script) ...
+#  * Couldn't make the first autoincrement id column to null in data; if it's possible, we could use the following shortcut, hopefully:
+#    `cat file | psql -h localhost -p 5432 -d elixir_beacon_dev -U microaccounts_dev -c "copy beacon_data_table from stdin with (format 'text')"`
+#
+
+# To change the dataset ID, set the environmental variable BeaconDatasetID (deafult: 1)
+dataset_id = ENV['BeaconDatasetID'] || 1
+
+# To change a separator for columns, set the environmental variable BeaconDataSeparator, e.g., change to ";" for SQL (default: "\t")
+separator = ENV['BeaconDataSeparator'] || "\t"
+
+# To enable column headers to be printed, set the environmental variable BeaconDataHeader to any value, e.g., "true" (default: false)
+header = ENV['BeaconDataHeader'] || false
+
+# To use SVTYPE column instead of TYPE column for the "type" column in schema, set the environmental variable BeaconDataSVtype to "SVTYPE" (default: "TYPE")
+svtype = ENV['BeaconDataSVtype'] || "TYPE"
+
+# Define primary columns to be extracted from VCF files by the bcftools
+# * AC: allele count in genotypes, for each ALT allele, in the same order as listed
+# * AN: total number of alleles in called genotypes
+# * NS: Number of samples with data
+# * AF: allele frequency for each ALT allele in the same order as listed: use this when estimated from primary data, not called genotypes
+columns = %w(CHROM POS ID REF ALT END AC AN NS AF SVLEN SVTYPE TYPE)
+
+bcfquery = columns.map { |col| "%#{col}"}.join("\t")
+svlen_colidx = columns.index("SVLEN")
 
 require 'date'
 
-columns = %w(CHROM POS ID REF ALT END AC AN NS AF SVLEN SVTYPE TYPE)
-query = columns.map { |col| "%#{col}"}.join("\t")
-
-puts "The following script takes the vcf files and generates the three files needed for Beacon."
+puts "The following script takes VCF files and generates the three files needed for Beacon."
 puts "---------------"
 
 ARGV.each_with_index do |vcf, i|
-  count = "#{i+1} / #{ARGV.size}"
+  count = "#{i+1} / #{ARGV.size} files"
   puts "#{DateTime.now.to_s} START #{count}"
+
   puts "Normalizing file #{vcf}"
-  `bcftools norm -m -both #{vcf} -o #{vcf}.norm`
+  system("bcftools norm -m -both #{vcf} -o #{vcf}.norm")
 
-  puts "Generating file #{vcf}.variants.tsv"
-  # [1]CHROM        [2]POS  [3]ID   [4]REF  [5]ALT  [6]END  TYPE    [7]SVLEN        [8]AC   [9]AN   [10]NS  [11]AF  SUM
-  # 21      9411239 rs559462325     G       A       9411239 SNP     .       1       5008    2504    0.000199681     1
-  # 21      9411245 rs181691356     C       A       9411245 SNP     .       4       5008    2504    0.000798722     4
-  variants_columns = %w(CHROM POS ID REF ALT END TYPE SVLEN AC AN NS AF SUM)
+  puts "Generating file #{vcf}.variants.data"
+  # https://github.com/ga4gh-beacon/beacon-elixir/blob/master/deploy/db/db/data/1_chr21_subset.variants.csv
+  # datasetId;chromosome;position;variantId;reference;alternate;end;svType;svLength;variantCount;callCount;sampleCount;frequency;sampleMatchingCount
+  # 1;21;9411238;rs559462325;G;A;;SNP;;1;5008;2504;0.000199681;1
+  # 1;21;9411244;rs181691356;C;A;;SNP;;4;5008;2504;0.000798722;4
+  variants_file = File.open("#{vcf}.variants.data", "w")
+  variants_header = %w(datasetId chromosome position variantId reference alternate end svType svLength variantCount callCount sampleCount frequency sampleMatchingCount)
+  variants_file.puts variants_header.join(separator) if header
+  variants_columns = [ "CHROM", "POS", "ID", "REF", "ALT", "END", svtype, "SVLEN", "AC", "AN", "NS", "AF" ]
   variants_slices = variants_columns.map { |col| columns.index(col) }.compact
-  variants_tsv = File.open("#{vcf}.variants.tsv", "w")
-  variants_tsv.puts variants_columns.join("\t")
 
-  puts "Generating file #{vcf}.variants.matching.sample.tsv"
-  # CHR POS ID REF ALT      TYPE    sampleId
-  # 21 9411239 rs559462325 G A      SNP     HG01029,
-  # 21 9411245 rs181691356 C A      SNP     HG01104,NA11995,NA19922,NA20807,
-  var_sam_columns = %w(CHROM POS ID REF ALT TYPE sampleId)
+  puts "Generating file #{vcf}.variants.matching.sample.data"
+  # https://github.com/ga4gh-beacon/beacon-elixir/blob/master/deploy/db/db/data/1_chr21_subset.variants.matching.samples.csv
+  # datasetId;chromosome;position;variantId;reference;alternate;svType;sampleId
+  # 1;21;9411238;rs559462325;G;A;SNP;{HG01029}
+  # 1;21;9411244;rs181691356;C;A;SNP;{HG01104,NA11995,NA19922,NA20807}
+  var_sam_file = File.open("#{vcf}.variants.matching.samples.data", "w")
+  var_sam_header = %w(datasetId chromosome position variantId reference alternate svType sampleId)
+  var_sam_file.puts var_sam_header.join(separator) if header
+  var_sam_columns = [ "CHROM", "POS", "ID", "REF", "ALT", svtype ]
   var_sam_slices = var_sam_columns.map { |col| columns.index(col) }.compact
-  var_sam_tsv = File.open("#{vcf}.variants.matching.sample.tsv", "w")
-  var_sam_tsv.puts var_sam_columns.join("\t")
 
-  puts "#{DateTime.now.to_s} bcftools start"
-  `bcftools query -f '#{query}[\t%SAMPLE=%GT]\n' #{vcf}.norm -o #{vcf}.norm.tsv`
-  puts "#{DateTime.now.to_s} bcftools end"
-  File.open("#{vcf}.norm.tsv", "r").each do |line|
+  puts "#{DateTime.now.to_s} start generation of two data files"
+  cmd = "bcftools query -f '#{bcfquery}[\t%SAMPLE=%GT]\n' #{vcf}.norm"
+  IO.popen(cmd, "r").each do |line|
     ary = line.strip.split("\t")
+    # Assign null value for the SVLEN (sv_length) column if bcftools puts '.' there as the column is typed as integer
+    if ary[svlen_colidx] == '.'
+      ary[svlen_colidx] = ''
+    end
     gts = ary[(columns.size)..-1]
     hetero = gts.select { |gt| gt[/=(0\|1|1\|0|0\/1|1\/0)/] }
     homalt = gts.select { |gt| gt[/=(1\|1|1\/1)/] }
@@ -54,23 +89,27 @@ ARGV.each_with_index do |vcf, i|
     num_homalt = homalt.size
     sum_hethom = samples.size
 
-    variants_tsv.puts [ ary.values_at(*variants_slices), sum_hethom ].flatten.join("\t")
-    var_sam_tsv.puts  [ ary.values_at(*var_sam_slices), samples.join(",") ].flatten.join("\t")
+    variants_file.puts [ dataset_id, ary.values_at(*variants_slices), sum_hethom ].flatten.join(separator)
+    var_sam_file.puts  [ dataset_id, ary.values_at(*var_sam_slices), "{#{samples.join(",")}}" ].flatten.join(separator)
+  end
+  puts "#{DateTime.now.to_s} end generation of two data files"
+
+  puts "Generating file #{vcf}.samples.data"
+  # https://github.com/ga4gh-beacon/beacon-elixir/blob/master/deploy/db/db/data/1_chr21_subset.samples.csv
+  # sampleId;datasetId
+  # HG00096;1
+  # HG00097;1
+  samples_file = File.open("#{vcf}.samples.data", "w")
+  sample_header = %w(sampleId datasetId)
+  samples_file.puts sample_header.join(separator) if header
+  cmd = "bcftools query -l #{vcf}"
+  IO.popen(cmd, "r").each do |sample_id|
+    samples_file.puts [ sample_id.strip, dataset_id ].join(separator)
   end
 
-  puts "Generating file #{vcf}.samples.tsv"
-  # sampleId
-  # HG00096
-  # HG00097
-  # HG00099
-  samples_tsv = File.open("#{vcf}.samples.tsv", "w")
-  samples_tsv.puts "sampleId"
-  samples = `bcftools query -l #{vcf}`
-  samples_tsv.puts samples
-
-  variants_tsv.close
-  var_sam_tsv.close
-  samples_tsv.close
+  variants_file.close
+  var_sam_file.close
+  samples_file.close
 
   puts "#{DateTime.now.to_s} DONE #{count}"
   puts

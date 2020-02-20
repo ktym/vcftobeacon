@@ -11,8 +11,7 @@
 # ruby_version    : 2.6
 #
 # NOTE:
-#  * TODO: confirm if variants.matching.sample and samples tables works
-#  * Don't need to print headers as I found CSV headers in sample data are dirfferent from the schema (and also from the ones in Dietmar's script) ...
+#  * We don't need to print headers as I found CSV headers in sample data are dirfferent from the schema (and also from the ones in Dietmar's script) ...
 #  * Couldn't make the first autoincrement id column to null in data; if it's possible, we could use the following shortcut, hopefully:
 #    `cat file | psql -h localhost -p 5432 -d elixir_beacon_dev -U microaccounts_dev -c "copy beacon_data_table from stdin with (format 'text')"`
 #
@@ -35,29 +34,6 @@ columns = %w(CHROM POS ID REF ALT END AC AN NS AF SVLEN SVTYPE TYPE)
 
 require 'date'
 
-class PrintBuffer
-  def initialize(io, lines = 10000)
-    @io = io
-    @buffer = []
-    @counter = 0
-    @lines = lines
-  end
-
-  def push(line)
-    @buffer << line
-    @counter += 1
-    if @counter % @lines == 0
-      $stderr.puts "... flush #{@lines} lines ..."
-      flush
-    end
-  end
-
-  def flush
-    @io.puts @buffer unless @buffer.empty?
-    @buffer = []
-  end
-end
-
 puts "The following script takes VCF files and generates the three files needed for Beacon."
 puts "---------------"
 
@@ -79,7 +55,6 @@ ARGV.each_with_index do |vcf, i|
   # 1;21;9411238;rs559462325;G;A;;SNP;;1;5008;2504;0.000199681;1
   # 1;21;9411244;rs181691356;C;A;;SNP;;4;5008;2504;0.000798722;4
   variants_file = File.open("#{vcf}.variants.data", "w")
-  variants_buffer = PrintBuffer.new(variants_file)
   variants_header = %w(datasetId chromosome position variantId reference alternate end svType svLength variantCount callCount sampleCount frequency sampleMatchingCount)
   variants_file.puts variants_header.join(separator) if header
   variants_columns = %w(CHROM POS ID REF ALT END TYPE SVLEN AC AN NS AF)
@@ -91,7 +66,6 @@ ARGV.each_with_index do |vcf, i|
   # 1;21;9411238;rs559462325;G;A;SNP;{HG01029}
   # 1;21;9411244;rs181691356;C;A;SNP;{HG01104,NA11995,NA19922,NA20807}
   var_sam_file = File.open("#{vcf}.variants.matching.samples.data", "w")
-  var_sam_buffer = PrintBuffer.new(var_sam_file)
   var_sam_header = %w(datasetId chromosome position variantId reference alternate svType sampleId)
   var_sam_file.puts var_sam_header.join(separator) if header
   var_sam_columns = %w(CHROM POS ID REF ALT TYPE)
@@ -117,11 +91,9 @@ ARGV.each_with_index do |vcf, i|
     num_homalt = homalt.size
     sum_hethom = samples.size
 
-    variants_buffer.push [ dataset_id, ary.values_at(*variants_slices), sum_hethom ].flatten.join(separator)
-    var_sam_buffer.push  [ dataset_id, ary.values_at(*var_sam_slices), "{#{samples.join(",")}}" ].flatten.join(separator)
+    variants_file.puts [ dataset_id, ary.values_at(*variants_slices), sum_hethom ].flatten.join(separator)
+    var_sam_file.puts  [ dataset_id, ary.values_at(*var_sam_slices), "{#{samples.join(",")}}" ].flatten.join(separator)
   end
-  variants_buffer.flush
-  var_sam_buffer.flush
   puts "#{DateTime.now.to_s} end generation of two data files"
 
   puts "Generating file #{vcf}.samples.data"

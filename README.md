@@ -68,6 +68,12 @@ To change the file to rename chromosomes,
 * or use the option `--chrsfile` / `-c`
 * (default: "./chr_name_conv.txt")
 
+### Sample columns
+
+If your VCF doesn't contain sample columns, skip +fill-tags
+
+* use the option `nofilltags` / `-n`
+
 ## Authors
 
 * Toshiaki Katayama <ktym@dbcls.jp> (Database Center for Life Science, Chiba, Japan)

@@ -41,8 +41,10 @@ ARGV.each_with_index do |vcf, i|
   var_sam_tsv = File.open("#{vcf}.variants.matching.sample.tsv", "w")
   var_sam_tsv.puts var_sam_columns.join("\t")
 
-  cmd = "bcftools query -f '#{query}[\t%SAMPLE=%GT]\n' #{vcf}.norm"
-  IO.popen(cmd, "r").each do |line|
+  puts "#{DateTime.now.to_s} bcftools start"
+  `bcftools query -f '#{query}[\t%SAMPLE=%GT]\n' #{vcf}.norm -o #{vcf}.norm.tsv`
+  puts "#{DateTime.now.to_s} bcftools end"
+  File.open("#{vcf}.norm.tsv", "r").each do |line|
     ary = line.strip.split("\t")
     gts = ary[(columns.size)..-1]
     hetero = gts.select { |gt| gt[/=(0\|1|1\|0|0\/1|1\/0)/] }
@@ -65,6 +67,10 @@ ARGV.each_with_index do |vcf, i|
   samples_tsv.puts "sampleId"
   samples = `bcftools query -l #{vcf}`
   samples_tsv.puts samples
+
+  variants_tsv.close
+  var_sam_tsv.close
+  samples_tsv.close
 
   puts "#{DateTime.now.to_s} DONE #{count}"
   puts

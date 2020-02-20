@@ -1,10 +1,11 @@
 #!/usr/bin/env ruby
+# -*- coding: euc-jp -*-
 #
 # title           : vcftobeacon.rb
 # description     : The following script takes VCF files and generates the three files with the columns for the Beacon.
 # author          : Toshiaki Katayama, Dietmar Fernández Orth
-# date            : 2019-12-18
-# version         : 1.0
+# date            : 2020-01-07
+# version         : 1.1
 # usage           : ruby vcftobeacon.rb /path/to/*.vcf
 # extended_usage  : BeaconDatasetID=5 BeaconDataSeparator=";" BeaconDataHeader=true ruby vcftobeacon.rb /path/to/*.vcf > vcftobeacon.log
 # notes           : Install bcftools and add plugin +fill-tags to the path (try `bcftools +fill-tags -vv` to see if you have the plugin).
@@ -25,22 +26,30 @@ separator = ENV['BeaconDataSeparator'] || "\t"
 # To enable column headers to be printed, set the environmental variable BeaconDataHeader to any value, e.g., "true" (default: false)
 header = ENV['BeaconDataHeader'] || false
 
+# To use SVTYPE and SVLEN information from VCF, set the environmental variable BeaconDataSV to any value, e.g., "true" (default: false)
+use_vcf_sv = ENV['BeaconDataSV'] || false
+
 # Define primary columns to be extracted from VCF files by the bcftools
 # * AC: allele count in genotypes, for each ALT allele, in the same order as listed
 # * AN: total number of alleles in called genotypes
 # * NS: Number of samples with data
 # * AF: allele frequency for each ALT allele in the same order as listed: use this when estimated from primary data, not called genotypes
-columns = %w(CHROM POS ID REF ALT END AC AN NS AF SVLEN SVTYPE TYPE)
+#columns = %w(CHROM POS ID REF ALT END AC AN NS AF TYPE)
+columns = %w(CHROM POS ID REF ALT END TYPE)
 
 require 'date'
 
 puts "The following script takes VCF files and generates the three files needed for Beacon."
 puts "---------------"
 
+if use_vcf_sv
+  columns += %w(SVTYPE SVLEN)
+  colidx_type = columns.index("TYPE")
+  colidx_svtype = columns.index("SVTYPE")
+  colidx_svlen = columns.index("SVLEN")
+end
+
 bcfquery = columns.map { |col| "%#{col}"}.join("\t")
-colidx_svlen = columns.index("SVLEN")
-colidx_svtype = columns.index("SVTYPE")
-colidx_type = columns.index("TYPE")
 
 ARGV.each_with_index do |vcf, i|
   count = "#{i+1} / #{ARGV.size} files"
@@ -55,9 +64,11 @@ ARGV.each_with_index do |vcf, i|
   # 1;21;9411238;rs559462325;G;A;;SNP;;1;5008;2504;0.000199681;1
   # 1;21;9411244;rs181691356;C;A;;SNP;;4;5008;2504;0.000798722;4
   variants_file = File.open("#{vcf}.variants.data", "w")
-  variants_header = %w(datasetId chromosome position variantId reference alternate end svType svLength variantCount callCount sampleCount frequency sampleMatchingCount)
+  #variants_header = %w(datasetId chromosome position variantId reference alternate end svType svLength variantCount callCount sampleCount frequency sampleMatchingCount)
+  variants_header = %w(datasetId chromosome position variantId reference alternate end svType variantCount callCount sampleCount frequency)
   variants_file.puts variants_header.join(separator) if header
-  variants_columns = %w(CHROM POS ID REF ALT END TYPE SVLEN AC AN NS AF)
+  #variants_columns = %w(CHROM POS ID REF ALT END TYPE SVLEN AC AN NS AF)
+  variants_columns = %w(CHROM POS ID REF ALT END TYPE)
   variants_slices = variants_columns.map { |col| columns.index(col) }.compact
 
   puts "Generating file #{vcf}.variants.matching.sample.data"
@@ -75,13 +86,15 @@ ARGV.each_with_index do |vcf, i|
   cmd = "bcftools query -f '#{bcfquery}[\t%SAMPLE=%GT]\n' #{vcf}.norm"
   IO.popen(cmd, "r").each do |line|
     ary = line.strip.split("\t")
-    # Assign null value for the SVLEN (sv_length) column if bcftools puts '.' there as the column is typed as integer
-    if ary[colidx_svlen] == '.'
-      ary[colidx_svlen] = ''
-    end
-    # If there is a value in "SVTYPE" other than ".", replace "TYPE" column value with it
-    if ary[colidx_svtype] != '.'
-      ary[colidx_type] = ary[colidx_svtype]
+    if use_vcf_sv
+      # Assign null value for the SVLEN (sv_length) column if bcftools puts '.' there as the column is typed as integer
+      if ary[colidx_svlen] == '.'
+        ary[colidx_svlen] = ''
+      end
+      # If there is a value in "SVTYPE" other than ".", replace "TYPE" column value with it
+      if ary[colidx_svtype] != '.'
+        ary[colidx_type] = ary[colidx_svtype]
+      end
     end
     gts = ary[(columns.size)..-1]
     hetero = gts.select { |gt| gt[/=(0\|1|1\|0|0\/1|1\/0)/] }

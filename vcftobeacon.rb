@@ -80,7 +80,7 @@ class VcfToBeacon
 
   def convert_vcf(files)
     files.each_with_index do |vcf, i|
-      count = "#{i+1} / #{ARGV.size} files"
+      count = "#{i+1} / #{files.size} files"
       puts "#{DateTime.now.to_s} START vcftobeacon #{count}"
 
       @vcf_file = vcf

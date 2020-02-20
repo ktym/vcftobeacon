@@ -104,7 +104,7 @@ class VcfToBeacon
     prepare_variants_sample
     prepare_samples_data
   end
-  
+
   def prepare_variants_data
     # https://github.com/ga4gh-beacon/beacon-elixir/blob/master/deploy/db/db/data/1_chr21_subset.variants.csv
     # datasetId;chromosome;position;variantId;reference;alternate;end;svType;svLength;variantCount;callCount;sampleCount;frequency;sampleMatchingCount
@@ -137,7 +137,11 @@ class VcfToBeacon
 
   def bcftools_command_line
     cmd = "bcftools filter -e 'N_ALT == 0' #{@vcf_file}"
-    cmd += " | bcftools annotate --rename-chrs #{@opts[:chrs_file]}" if File.exists?(@opts[:chrs_file])
+    if File.exists?(@opts[:chrs_file])
+      cmd += " | bcftools annotate --rename-chrs #{@opts[:chrs_file]}"
+    else
+      puts "Warning: chromosome rename file #{@opts[:chrs_file]} is not found"
+    end
     cmd += " | bcftools norm -m -both"
     cmd += " | bcftools +fill-tags" unless @opts[:no_fill_tags]
     cmd += " | bcftools query --allow-undef-tags -f '#{@bcf_query}[\t%SAMPLE=%GT]\n'"
@@ -166,7 +170,7 @@ class VcfToBeacon
       num_hetero = hetero.size
       num_homalt = homalt.size
       sum_hethom = samples.size
-      
+
       @variants_file.puts [ @opts[:dataset_id], ary.values_at(*get_index(:variants)), sum_hethom ].flatten.join(@opts[:separator])
       @var_sam_file.puts  [ @opts[:dataset_id], ary.values_at(*get_index(:var_sam)), "{#{samples.join(",")}}" ].flatten.join(@opts[:separator])
     end
@@ -187,7 +191,7 @@ class VcfToBeacon
     @var_sam_file.close
     @samples_file.close
   end
-      
+
 end
 
 VcfToBeacon.new(ARGV)
